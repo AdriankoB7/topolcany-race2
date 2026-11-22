@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Topoľčany Race Demo – Real Map</title>
+<style>
+  /* Minimal inline subset of mapbox-gl.css (the artifact viewer's CSP blocks
+     loading it from unpkg as a <link> — only scripts are admitted, not
+     external stylesheets). This covers what's needed since we use no
+     Mapbox UI controls (no zoom buttons, no popups) beyond attribution. */
+  .mapboxgl-map{position:relative;width:100%;height:100%;overflow:hidden;-webkit-tap-highlight-color:rgba(0,0,0,0);font:12px/20px sans-serif;}
+  .mapboxgl-canvas{position:absolute;left:0;top:0;}
+  .mapboxgl-canvas-container.mapboxgl-interactive{cursor:grab;}
+  .mapboxgl-ctrl-bottom-right{position:absolute;right:0;bottom:0;pointer-events:none;}
+  .mapboxgl-ctrl{pointer-events:auto;}
+  .mapboxgl-ctrl-attrib{background:rgba(0,0,0,0.3);color:#fff;padding:0 6px;font-size:10px;border-radius:4px 0 0 0;}
+  .mapboxgl-ctrl-attrib a{color:#fff;}
+  html,body{margin:0;padding:0;overflow:hidden;background:#111;touch-action:none;}
+  #map{position:fixed;inset:0;}
+  #ui{position:fixed;bottom:0;left:0;width:100%;height:170px;z-index:10;}
+  .btn{position:absolute;width:88px;height:88px;border-radius:50%;background:rgba(255,255,255,0.15);
+       border:2px solid rgba(255,255,255,0.35);display:flex;align-items:center;justify-content:center;
+       font-size:26px;color:#fff;font-family:sans-serif;user-select:none;}
+  #left{left:16px;bottom:18px;}
+  #right{left:120px;bottom:18px;}
+  #gas{right:120px;bottom:18px;width:100px;height:100px;background:rgba(255,80,60,0.22);border-color:rgba(255,120,100,0.5);}
+  #boost{right:16px;bottom:18px;width:100px;height:100px;background:rgba(70,160,255,0.22);border-color:rgba(100,180,255,0.6);font-size:15px;}
+  #boost.ready{background:rgba(255,220,60,0.35);border-color:#ffd23c;}
+  #hud{position:fixed;top:10px;left:10px;color:#fff;font-family:sans-serif;font-size:13px;
+    text-shadow:0 1px 3px #000;z-index:10;line-height:1.5;max-width:70%;}
+  #boostbar{width:160px;height:14px;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.4);border-radius:7px;overflow:hidden;margin-top:4px;}
+  #boostfill{height:100%;width:0%;background:linear-gradient(90deg,#4aa3ff,#ffd23c);transition:width 0.08s;}
+  #loading{position:fixed;inset:0;background:#111;color:#fff;font-family:sans-serif;display:flex;
+    align-items:center;justify-content:center;z-index:20;font-size:15px;text-align:center;padding:20px;box-sizing:border-box;}
+</style>
+</head>
+<body>
+<div id="loading">Načítavam reálnu mapu Topoľčian (Mapbox)...</div>
+<div id="map"></div>
+<div id="hud">
+  Topoľčany – reálna mapa (Mapbox 3D budovy + satelit) + auto navrchu (Three.js)<br>
+  Ak sa niečo pokazí, napíš presne čo vidíš<br>
+  <div id="boostbar"><div id="boostfill"></div></div>
+</div>
+<div id="ui">
+  <div class="btn" id="left">&#8630;</div>
+  <div class="btn" id="right">&#8631;</div>
+  <div class="btn" id="gas">GAS</div>
+  <div class="btn" id="boost">BOOST</div>
+</div>
+
+<script src="https://unpkg.com/mapbox-gl@3.3.0/dist/mapbox-gl.js"></script>
+<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+<script>
+window.addEventListener('load', function(){
+  const loadingEl = document.getElementById('loading');
+  try {
+
+  if(typeof mapboxgl === 'undefined'){ loadingEl.innerText = 'Mapbox GL sa nepodarilo načítať (skontroluj pripojenie).'; return; }
+  if(typeof THREE === 'undefined'){ loadingEl.innerText = 'Three.js sa nepodarilo načítať (skontroluj pripojenie).'; return; }
+
+  mapboxgl.accessToken = 'pk.eyJ1Ijoidm9kYS11ZHJ6YmEiLCJhIjoiY213c2N6NXU2MHN5YTJ6czNhYmlmYXRhaSJ9.QLf28_aZke_OsBqSwxDQJA';
+
+  // Real centre of Topoľčany's main square (Nám. M. R. Štefánika).
+  const CENTER = [18.17694, 48.55417];
+
+  const map = new mapboxgl.Map({
+    container: 'map',
+    style: 'mapbox://styles/mapbox/satellite-streets-v12',
+    center: CENTER,
+    zoom: 17.5,
+    pitch: 60,
+    bearing: 0,
+    antialias: true
+  });
+
+  // ---- Car state (real lng/lat, not local meters) ----
+  const metersPerDegLat = 110540;
+  const metersPerDegLng = 111320 * Math.cos(CENTER[1]*Math.PI/180);
+  const car = { lng: CENTER[0], lat: CENTER[1], bearingDeg: 0, speed:0, boost:0, boosting:0 };
+
+  const keys = { left:false, right:false, gas:false, boost:false };
+  function bindBtn(id,key){
+    const el = document.getElementById(id);
+    const on = e=>{keys[key]=true; e.preventDefault();};
+    const off = e=>{keys[key]=false; e.preventDefault();};
+    el.addEventListener('touchstart',on); el.addEventListener('touchend',off); el.addEventListener('touchcancel',off);
+    el.addEventListener('mousedown',on); el.addEventListener('mouseup',off); el.addEventListener('mouseleave',off);
+  }
+  bindBtn('left','left'); bindBtn('right','right'); bindBtn('gas','gas'); bindBtn('boost','boost');
+  window.addEventListener('keydown', e=>{
+    if(e.key==='ArrowLeft') keys.left=true;
+    if(e.key==='ArrowRight') keys.right=true;
+    if(e.key==='ArrowUp') keys.gas=true;
+    if(e.key===' ') keys.boost=true;
+  });
+  window.addEventListener('keyup', e=>{
+    if(e.key==='ArrowLeft') keys.left=false;
+    if(e.key==='ArrowRight') keys.right=false;
+    if(e.key==='ArrowUp') keys.gas=false;
+    if(e.key===' ') keys.boost=false;
+  });
+
+  function updateCar(dt){
+    const turning = keys.left || keys.right;
+    const turnRate = 75; // degrees/sec at speed
+    const turnFactor = Math.min(1, Math.abs(car.speed)/4 + 0.3);
+    if(keys.left) car.bearingDeg -= turnRate*dt*turnFactor;
+    if(keys.right) car.bearingDeg += turnRate*dt*turnFactor;
+
+    if(keys.boost && car.boost>5 && car.boosting<=0) car.boosting = 1.1;
+    if(car.boosting>0){ car.boosting -= dt; car.boost = Math.max(0, car.boost-55*dt); }
+    if(turning && car.speed > 6){ car.boost = Math.min(100, car.boost + 38*dt); }
+
+    if(keys.gas) car.speed += 13*dt; else car.speed -= 6.5*dt;
+    if(car.boosting>0) car.speed += 18*dt;
+    car.speed *= 0.995;
+    car.speed = Math.max(0, Math.min(car.boosting>0?30:18, car.speed));
+
+    const bearingRad = car.bearingDeg * Math.PI/180;
+    const dEast = Math.sin(bearingRad) * car.speed * dt;
+    const dNorth = Math.cos(bearingRad) * car.speed * dt;
+    car.lng += dEast / metersPerDegLng;
+    car.lat += dNorth / metersPerDegLat;
+  }
+
+  // ---- Custom Three.js layer rendered inside the Mapbox GL context ----
+  // Follows the official Mapbox "Add a 3D model with three.js" pattern,
+  // but the model is redrawn at the car's current lng/lat every frame
+  // instead of staying fixed.
+  function buildCarMesh(){
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2.2,0.5,1.1), new THREE.MeshPhongMaterial({color:0xff5b4a}));
+    body.position.y = 0.45; g.add(body);
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.1,0.45,0.9), new THREE.MeshPhongMaterial({color:0x222222}));
+    cabin.position.set(-0.1,0.9,0); g.add(cabin);
+    const wheelGeo = new THREE.CylinderGeometry(0.32,0.32,0.3,10);
+    const wheelMat = new THREE.MeshPhongMaterial({color:0x1a1a1a});
+    [[0.75,0.55],[0.75,-0.55],[-0.75,0.55],[-0.75,-0.55]].forEach(([wx,wz])=>{
+      const w = new THREE.Mesh(wheelGeo, wheelMat);
+      w.rotation.z = Math.PI/2; w.position.set(wx,0.32,wz); g.add(w);
+    });
+    return g;
+  }
+
+  const customLayer = {
+    id: 'car-3d-layer',
+    type: 'custom',
+    renderingMode: '3d',
+    onAdd: function(map, gl){
+      this.camera = new THREE.Camera();
+      this.scene = new THREE.Scene();
+      this.scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+      const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+      sun.position.set(0,-70,100).normalize();
+      this.scene.add(sun);
+      this.carMesh = buildCarMesh();
+      this.scene.add(this.carMesh);
+
+      this.renderer = new THREE.WebGLRenderer({
+        canvas: map.getCanvas(), context: gl, antialias: true
+      });
+      this.renderer.autoClear = false;
+    },
+    render: function(gl, matrix){
+      // Convert the car's real lng/lat into Mapbox's Mercator coordinate
+      // space, then combine with the map's own projection matrix — this is
+      // the standard way to place a moving three.js object at real-world
+      // GPS coordinates on a Mapbox GL custom layer.
+      const mc = mapboxgl.MercatorCoordinate.fromLngLat([car.lng, car.lat], 0.6);
+      const scale = mc.meterInMercatorCoordinateUnits();
+
+      const m = new THREE.Matrix4().fromArray(matrix);
+      const l = new THREE.Matrix4()
+        .makeTranslation(mc.x, mc.y, mc.z)
+        .scale(new THREE.Vector3(scale, -scale, scale))
+        .multiply(new THREE.Matrix4().makeRotationZ(-car.bearingDeg*Math.PI/180 + Math.PI/2))
+        .multiply(new THREE.Matrix4().makeRotationX(Math.PI/2));
+
+      this.camera.projectionMatrix = m.multiply(l);
+      this.renderer.resetState();
+      this.renderer.render(this.scene, this.camera);
+      map.triggerRepaint();
+    }
+  };
+
+  map.on('load', ()=>{
+    // Real 3D buildings, extruded to their real height — data from OpenStreetMap,
+    // bundled in Mapbox's own vector tiles. No manual OSM export needed.
+    const layers = map.getStyle().layers;
+    let labelLayerId;
+    for(const layer of layers){
+      if(layer.type === 'symbol' && layer.layout && layer.layout['text-field']){ labelLayerId = layer.id; break; }
+    }
+    try {
+      map.addLayer({
+        id: 'add-3d-buildings',
+        source: 'composite',
+        'source-layer': 'building',
+        filter: ['==', 'extrude', 'true'],
+        type: 'fill-extrusion',
+        minzoom: 14,
+        paint: {
+          'fill-extrusion-color': '#c9beab',
+          'fill-extrusion-height': ['interpolate',['linear'],['zoom'],14,0,14.05,['get','height']],
+          'fill-extrusion-base': ['interpolate',['linear'],['zoom'],14,0,14.05,['get','min_height']],
+          'fill-extrusion-opacity': 0.9
+        }
+      }, labelLayerId);
+    } catch(e){ /* satellite-streets style may already include buildings; ignore if layer exists */ }
+
+    map.addLayer(customLayer);
+    loadingEl.style.display = 'none';
+
+    let last = performance.now();
+    function frame(now){
+      const dt = Math.min(0.033, (now-last)/1000); last = now;
+      updateCar(dt);
+      map.jumpTo({ center:[car.lng, car.lat], bearing: car.bearingDeg, pitch: 60, zoom: 18 });
+      document.getElementById('boostfill').style.width = car.boost + '%';
+      document.getElementById('boost').classList.toggle('ready', car.boost > 20);
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  });
+
+  map.on('error', (e)=>{
+    console.error('Mapbox error:', e);
+    loadingEl.style.display = 'flex';
+    loadingEl.innerText = 'Mapbox chyba: ' + (e && e.error && e.error.message ? e.error.message : JSON.stringify(e).slice(0,200));
+  });
+
+  } catch(err){
+    loadingEl.innerText = 'JS chyba: ' + err.message;
+    console.error(err);
+  }
+});
+</script>
+</body>
+</html>
