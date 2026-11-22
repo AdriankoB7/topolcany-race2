@@ -228,7 +228,13 @@ window.addEventListener('load', function(){
       updateCar(dt);
       if(now - lastCamUpdate > CAM_UPDATE_MS){
         lastCamUpdate = now;
-        map.jumpTo({ center:[car.lng, car.lat], bearing: car.bearingDeg, pitch: 60, zoom: 19.6 });
+        // easeTo (not jumpTo): smoothly interpolates to the new camera pose
+        // over the same interval, instead of teleporting — same, reduced
+        // call rate for the tile loader's sake, but no visible jump/stutter.
+        map.easeTo({
+          center:[car.lng, car.lat], bearing: car.bearingDeg, pitch: 60, zoom: 19.6,
+          duration: CAM_UPDATE_MS, easing: t => t
+        });
       }
       document.getElementById('boostfill').style.width = car.boost + '%';
       document.getElementById('boost').classList.toggle('ready', car.boost > 20);
