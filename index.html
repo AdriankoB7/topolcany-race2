@@ -69,7 +69,7 @@ window.addEventListener('load', function(){
     container: 'map',
     style: 'mapbox://styles/mapbox/satellite-streets-v12',
     center: CENTER,
-    zoom: 17.5,
+    zoom: 19.6,
     pitch: 60,
     bearing: 0,
     antialias: true
@@ -215,10 +215,21 @@ window.addEventListener('load', function(){
     loadingEl.style.display = 'none';
 
     let last = performance.now();
+    let lastCamUpdate = 0;
+    // Moving the map's own camera every single animation frame (60/sec)
+    // never lets Mapbox's tile loader settle — it keeps cancelling and
+    // re-requesting satellite/street tiles, so they never finish loading.
+    // The car itself still animates at full framerate (via the custom
+    // layer's render() + triggerRepaint); only the underlying map camera
+    // is throttled, which is enough for the tile loader to catch up.
+    const CAM_UPDATE_MS = 120;
     function frame(now){
       const dt = Math.min(0.033, (now-last)/1000); last = now;
       updateCar(dt);
-      map.jumpTo({ center:[car.lng, car.lat], bearing: car.bearingDeg, pitch: 60, zoom: 18 });
+      if(now - lastCamUpdate > CAM_UPDATE_MS){
+        lastCamUpdate = now;
+        map.jumpTo({ center:[car.lng, car.lat], bearing: car.bearingDeg, pitch: 60, zoom: 19.6 });
+      }
       document.getElementById('boostfill').style.width = car.boost + '%';
       document.getElementById('boost').classList.toggle('ready', car.boost > 20);
       requestAnimationFrame(frame);
