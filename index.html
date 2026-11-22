@@ -65,12 +65,6 @@ window.addEventListener('load', function(){
   // Real centre of Topoľčany's main square (Nám. M. R. Štefánika).
   const CENTER = [18.17694, 48.55417];
 
-  // Zoom 19.6 (used in an earlier version, to make the car look bigger)
-  // pressed the camera so close to the real, fully-extruded building
-  // heights that their walls filled the whole view and hid the ground
-  // plane entirely — no satellite imagery, no road lines, just building
-  // facades. Back to a normal city-navigation zoom; the car's on-screen
-  // size is now handled separately via CAR_VISUAL_SCALE below.
   const MAP_ZOOM = 18;
   const MAP_PITCH = 60;
 
@@ -143,7 +137,9 @@ window.addEventListener('load', function(){
   // ---- Custom Three.js layer rendered inside the Mapbox GL context ----
   // Follows the official Mapbox "Add a 3D model with three.js" pattern,
   // but the model is redrawn at the car's current lng/lat every frame
-  // instead of staying fixed.
+  // instead of staying fixed. This is what keeps the car's motion smooth
+  // at full framerate EVEN THOUGH the map camera itself is now throttled
+  // (see CAM_UPDATE_MS below) — the two are fully decoupled.
   function buildCarMesh(){
     const g = new THREE.Group();
     const body = new THREE.Mesh(new THREE.BoxGeometry(2.2,0.5,1.1), new THREE.MeshPhongMaterial({color:0xff5b4a}));
@@ -230,15 +226,27 @@ window.addEventListener('load', function(){
     loadingEl.style.display = 'none';
 
     let last = performance.now();
-    // At a normal zoom (18, not the 19.6 we tried before), tiles are cheap
-    // enough that updating the camera every single animation frame with a
-    // plain jumpTo is smooth and doesn't starve the tile loader — no need
-    // for the throttled/eased camera-follow we tried earlier, which added
-    // its own stutter without fixing the real problem (zoom was too high).
+    let lastCamUpdate = 0;
+    // DevTools network tab showed every satellite tile request coming back
+    // 429 "Too Many Requests" — Mapbox was rate-limiting us because moving
+    // the camera every single animation frame (60/sec) re-requests nearby
+    // tiles constantly. That's why satellite imagery and road lines NEVER
+    // rendered, from the very first version: it's not a loading-speed
+    // problem, it's a hard rate limit. Throttling to a few camera updates
+    // per second fixes it. The car itself keeps animating at full
+    // framerate regardless (via the custom layer's own render() above),
+    // so this doesn't reintroduce visible motion stutter.
+    const CAM_UPDATE_MS = 400;
     function frame(now){
       const dt = Math.min(0.033, (now-last)/1000); last = now;
       updateCar(dt);
-      map.jumpTo({ center:[car.lng, car.lat], bearing: car.bearingDeg, pitch: MAP_PITCH, zoom: MAP_ZOOM });
+      if(now - lastCamUpdate > CAM_UPDATE_MS){
+        lastCamUpdate = now;
+        map.easeTo({
+          center:[car.lng, car.lat], bearing: car.bearingDeg, pitch: MAP_PITCH, zoom: MAP_ZOOM,
+          duration: CAM_UPDATE_MS, easing: t => t
+        });
+      }
       document.getElementById('boostfill').style.width = car.boost + '%';
       document.getElementById('boost').classList.toggle('ready', car.boost > 20);
       requestAnimationFrame(frame);
