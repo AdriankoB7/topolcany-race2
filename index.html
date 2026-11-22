@@ -29,11 +29,11 @@
 <div id="loading">Načítavam vlastný dataset mapy (data.json)...</div>
 <canvas id="canvas3d"></canvas>
 <div id="hud">
-  Topoľčany – vlastný dataset (OpenStreetMap, stiahnuté raz, bez živého API)<br>
+  Topoľčany – vlastný dataset (OpenStreetMap + satelit, stiahnuté raz, bez živého API)<br>
   Ak sa niečo pokazí, napíš presne čo vidíš<br>
   <div id="boostbar"><div id="boostfill"></div></div>
 </div>
-<div id="attrib">© OpenStreetMap contributors</div>
+<div id="attrib">© OpenStreetMap contributors, © Mapbox</div>
 <div id="ui">
   <div class="btn" id="left">&#8630;</div>
   <div class="btn" id="right">&#8631;</div>
@@ -89,17 +89,50 @@ window.addEventListener('load', function(){
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // ---- Ground plane + a light grid so there's a sense of scale/orientation
-  // even in areas the dataset doesn't cover (outside the ~400x400m box). ----
+  // ---- Fallback ground plane (fills the world beyond the ~400x400m area
+  // the dataset/texture actually cover) + a light grid for scale. ----
   const groundGeo = new THREE.PlaneGeometry(4000, 4000);
   const ground = new THREE.Mesh(groundGeo, new THREE.MeshLambertMaterial({color:0x4a7c4e}));
   ground.rotation.x = -Math.PI/2;
   scene.add(ground);
   const grid = new THREE.GridHelper(1000, 100, 0x2f5c33, 0x2f5c33);
-  grid.position.y = 0.03;
+  grid.position.y = 0.01;
   grid.material.transparent = true;
   grid.material.opacity = 0.35;
   scene.add(grid);
+
+  // ---- Real satellite/street-map texture, downloaded ONCE (not a live
+  // tile stream) for the exact same bounding box as data.json, stored as
+  // our own base64-text asset (map_texture.b64) and decoded client-side
+  // with atob() — no image hosting dependency at runtime either. Sits on
+  // a 400x400m plane centred on the local origin, matching the dataset's
+  // real-world extent exactly. Default PlaneGeometry UVs already line up
+  // with our X=east/Z=south convention (top of the photo = north = -Z). ----
+  const mapGroundGeo = new THREE.PlaneGeometry(400, 400);
+  const mapGroundMat = new THREE.MeshBasicMaterial({color:0x3f6b43});
+  const mapGround = new THREE.Mesh(mapGroundGeo, mapGroundMat);
+  mapGround.rotation.x = -Math.PI/2;
+  mapGround.position.y = 0.02;
+  scene.add(mapGround);
+
+  fetch('./map_texture.b64').then(r=>{
+    if(!r.ok) throw new Error('map_texture.b64 HTTP ' + r.status);
+    return r.text();
+  }).then(b64=>{
+    const binary = atob(b64.trim());
+    const bytes = new Uint8Array(binary.length);
+    for(let i=0;i<binary.length;i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], {type:'image/jpeg'});
+    const url = URL.createObjectURL(blob);
+    new THREE.TextureLoader().load(url, (tex)=>{
+      if('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
+      mapGroundMat.map = tex;
+      mapGroundMat.needsUpdate = true;
+      URL.revokeObjectURL(url);
+    });
+  }).catch(err=>{
+    console.error('Textúra mapy sa nenačítala:', err);
+  });
 
   // ---- Buildings: merged wall geometry, extruded to real height ----
   function buildBuildingsMesh(buildings){
@@ -153,7 +186,7 @@ window.addEventListener('load', function(){
   }
   const roadsMesh = new THREE.Mesh(
     buildRoadsMesh(data.roads),
-    new THREE.MeshLambertMaterial({color:0x474747})
+    new THREE.MeshLambertMaterial({color:0x474747, transparent:true, opacity:0.55})
   );
   roadsMesh.renderOrder = 1;
   scene.add(roadsMesh);
