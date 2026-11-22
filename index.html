@@ -65,12 +65,21 @@ window.addEventListener('load', function(){
   // Real centre of Topoľčany's main square (Nám. M. R. Štefánika).
   const CENTER = [18.17694, 48.55417];
 
+  // Zoom 19.6 (used in an earlier version, to make the car look bigger)
+  // pressed the camera so close to the real, fully-extruded building
+  // heights that their walls filled the whole view and hid the ground
+  // plane entirely — no satellite imagery, no road lines, just building
+  // facades. Back to a normal city-navigation zoom; the car's on-screen
+  // size is now handled separately via CAR_VISUAL_SCALE below.
+  const MAP_ZOOM = 18;
+  const MAP_PITCH = 60;
+
   const map = new mapboxgl.Map({
     container: 'map',
     style: 'mapbox://styles/mapbox/satellite-streets-v12',
     center: CENTER,
-    zoom: 19.6,
-    pitch: 60,
+    zoom: MAP_ZOOM,
+    pitch: MAP_PITCH,
     bearing: 0,
     antialias: true
   });
@@ -79,6 +88,12 @@ window.addEventListener('load', function(){
   const metersPerDegLat = 110540;
   const metersPerDegLng = 111320 * Math.cos(CENTER[1]*Math.PI/180);
   const car = { lng: CENTER[0], lat: CENTER[1], bearingDeg: 0, speed:0, boost:0, boosting:0 };
+
+  // Purely visual multiplier on the car's three.js model, independent of
+  // the map's real-world scale/zoom — lets the car look appropriately
+  // prominent without having to zoom the camera in so far that buildings
+  // block the view.
+  const CAR_VISUAL_SCALE = 3.2;
 
   const keys = { left:false, right:false, gas:false, boost:false };
   function bindBtn(id,key){
@@ -169,7 +184,7 @@ window.addEventListener('load', function(){
       // the standard way to place a moving three.js object at real-world
       // GPS coordinates on a Mapbox GL custom layer.
       const mc = mapboxgl.MercatorCoordinate.fromLngLat([car.lng, car.lat], 0.6);
-      const scale = mc.meterInMercatorCoordinateUnits();
+      const scale = mc.meterInMercatorCoordinateUnits() * CAR_VISUAL_SCALE;
 
       const m = new THREE.Matrix4().fromArray(matrix);
       const l = new THREE.Matrix4()
@@ -215,27 +230,15 @@ window.addEventListener('load', function(){
     loadingEl.style.display = 'none';
 
     let last = performance.now();
-    let lastCamUpdate = 0;
-    // Moving the map's own camera every single animation frame (60/sec)
-    // never lets Mapbox's tile loader settle — it keeps cancelling and
-    // re-requesting satellite/street tiles, so they never finish loading.
-    // The car itself still animates at full framerate (via the custom
-    // layer's render() + triggerRepaint); only the underlying map camera
-    // is throttled, which is enough for the tile loader to catch up.
-    const CAM_UPDATE_MS = 120;
+    // At a normal zoom (18, not the 19.6 we tried before), tiles are cheap
+    // enough that updating the camera every single animation frame with a
+    // plain jumpTo is smooth and doesn't starve the tile loader — no need
+    // for the throttled/eased camera-follow we tried earlier, which added
+    // its own stutter without fixing the real problem (zoom was too high).
     function frame(now){
       const dt = Math.min(0.033, (now-last)/1000); last = now;
       updateCar(dt);
-      if(now - lastCamUpdate > CAM_UPDATE_MS){
-        lastCamUpdate = now;
-        // easeTo (not jumpTo): smoothly interpolates to the new camera pose
-        // over the same interval, instead of teleporting — same, reduced
-        // call rate for the tile loader's sake, but no visible jump/stutter.
-        map.easeTo({
-          center:[car.lng, car.lat], bearing: car.bearingDeg, pitch: 60, zoom: 19.6,
-          duration: CAM_UPDATE_MS, easing: t => t
-        });
-      }
+      map.jumpTo({ center:[car.lng, car.lat], bearing: car.bearingDeg, pitch: MAP_PITCH, zoom: MAP_ZOOM });
       document.getElementById('boostfill').style.width = car.boost + '%';
       document.getElementById('boost').classList.toggle('ready', car.boost > 20);
       requestAnimationFrame(frame);
