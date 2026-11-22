@@ -3,21 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-<title>Topoľčany Race Demo – Real Map</title>
+<title>Topoľčany Race Demo – vlastný dataset (OSM)</title>
 <style>
-  /* Minimal inline subset of mapbox-gl.css (the artifact viewer's CSP blocks
-     loading it from unpkg as a <link> — only scripts are admitted, not
-     external stylesheets). This covers what's needed since we use no
-     Mapbox UI controls (no zoom buttons, no popups) beyond attribution. */
-  .mapboxgl-map{position:relative;width:100%;height:100%;overflow:hidden;-webkit-tap-highlight-color:rgba(0,0,0,0);font:12px/20px sans-serif;}
-  .mapboxgl-canvas{position:absolute;left:0;top:0;}
-  .mapboxgl-canvas-container.mapboxgl-interactive{cursor:grab;}
-  .mapboxgl-ctrl-bottom-right{position:absolute;right:0;bottom:0;pointer-events:none;}
-  .mapboxgl-ctrl{pointer-events:auto;}
-  .mapboxgl-ctrl-attrib{background:rgba(0,0,0,0.3);color:#fff;padding:0 6px;font-size:10px;border-radius:4px 0 0 0;}
-  .mapboxgl-ctrl-attrib a{color:#fff;}
   html,body{margin:0;padding:0;overflow:hidden;background:#111;touch-action:none;}
-  #map{position:fixed;inset:0;}
+  #canvas3d{position:fixed;inset:0;display:block;}
   #ui{position:fixed;bottom:0;left:0;width:100%;height:170px;z-index:10;}
   .btn{position:absolute;width:88px;height:88px;border-radius:50%;background:rgba(255,255,255,0.15);
        border:2px solid rgba(255,255,255,0.35);display:flex;align-items:center;justify-content:center;
@@ -31,18 +20,20 @@
     text-shadow:0 1px 3px #000;z-index:10;line-height:1.5;max-width:70%;}
   #boostbar{width:160px;height:14px;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.4);border-radius:7px;overflow:hidden;margin-top:4px;}
   #boostfill{height:100%;width:0%;background:linear-gradient(90deg,#4aa3ff,#ffd23c);transition:width 0.08s;}
+  #attrib{position:fixed;right:6px;bottom:176px;z-index:10;color:rgba(255,255,255,0.65);font-family:sans-serif;font-size:10px;background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;}
   #loading{position:fixed;inset:0;background:#111;color:#fff;font-family:sans-serif;display:flex;
     align-items:center;justify-content:center;z-index:20;font-size:15px;text-align:center;padding:20px;box-sizing:border-box;}
 </style>
 </head>
 <body>
-<div id="loading">Načítavam reálnu mapu Topoľčian (Mapbox)...</div>
-<div id="map"></div>
+<div id="loading">Načítavam vlastný dataset mapy (data.json)...</div>
+<canvas id="canvas3d"></canvas>
 <div id="hud">
-  Topoľčany – reálna mapa (Mapbox 3D budovy + satelit) + auto navrchu (Three.js)<br>
+  Topoľčany – vlastný dataset (OpenStreetMap, stiahnuté raz, bez živého API)<br>
   Ak sa niečo pokazí, napíš presne čo vidíš<br>
   <div id="boostbar"><div id="boostfill"></div></div>
 </div>
+<div id="attrib">© OpenStreetMap contributors</div>
 <div id="ui">
   <div class="btn" id="left">&#8630;</div>
   <div class="btn" id="right">&#8631;</div>
@@ -50,44 +41,136 @@
   <div class="btn" id="boost">BOOST</div>
 </div>
 
-<script src="https://unpkg.com/mapbox-gl@3.3.0/dist/mapbox-gl.js"></script>
 <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
 <script>
 window.addEventListener('load', function(){
   const loadingEl = document.getElementById('loading');
   try {
 
-  if(typeof mapboxgl === 'undefined'){ loadingEl.innerText = 'Mapbox GL sa nepodarilo načítať (skontroluj pripojenie).'; return; }
   if(typeof THREE === 'undefined'){ loadingEl.innerText = 'Three.js sa nepodarilo načítať (skontroluj pripojenie).'; return; }
 
-  mapboxgl.accessToken = 'pk.eyJ1Ijoidm9kYS11ZHJ6YmEiLCJhIjoiY213c2N6NXU2MHN5YTJ6czNhYmlmYXRhaSJ9.QLf28_aZke_OsBqSwxDQJA';
-
-  // Real centre of Topoľčany's main square (Nám. M. R. Štefánika).
-  const CENTER = [18.17694, 48.55417];
-
-  const MAP_ZOOM = 18;
-  const MAP_PITCH = 60;
-
-  const map = new mapboxgl.Map({
-    container: 'map',
-    style: 'mapbox://styles/mapbox/satellite-streets-v12',
-    center: CENTER,
-    zoom: MAP_ZOOM,
-    pitch: MAP_PITCH,
-    bearing: 0,
-    antialias: true
+  // ---- Static dataset: OpenStreetMap buildings + roads, downloaded ONCE
+  // via Overpass Turbo and stored as our own file (data.json), already
+  // converted to local meters around Nám. M. R. Štefánika. No Mapbox, no
+  // live tile API, no rate limits — this fetch is same-origin and happens
+  // exactly once at load. World convention: X = east, Z = south
+  // (so Z = -north), Y = up.
+  fetch('./data.json').then(r=>{
+    if(!r.ok) throw new Error('data.json HTTP ' + r.status);
+    return r.json();
+  }).then(initGame).catch(err=>{
+    loadingEl.innerText = 'Nepodarilo sa načítať data.json: ' + err.message;
+    console.error(err);
   });
 
-  // ---- Car state (real lng/lat, not local meters) ----
-  const metersPerDegLat = 110540;
-  const metersPerDegLng = 111320 * Math.cos(CENTER[1]*Math.PI/180);
-  const car = { lng: CENTER[0], lat: CENTER[1], bearingDeg: 0, speed:0, boost:0, boosting:0 };
+  function initGame(data){
 
-  // Purely visual multiplier on the car's three.js model, independent of
-  // the map's real-world scale/zoom — lets the car look appropriately
-  // prominent without having to zoom the camera in so far that buildings
-  // block the view.
-  const CAR_VISUAL_SCALE = 3.2;
+  const SKY_COLOR = 0x9fd4ec;
+
+  const canvas = document.getElementById('canvas3d');
+  const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(SKY_COLOR);
+  scene.fog = new THREE.Fog(SKY_COLOR, 90, 420);
+
+  const camera = new THREE.PerspectiveCamera(62, window.innerWidth/window.innerHeight, 0.1, 2000);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.85);
+  sun.position.set(120, 220, 80);
+  scene.add(sun);
+
+  window.addEventListener('resize', ()=>{
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // ---- Ground plane ----
+  const groundGeo = new THREE.PlaneGeometry(4000, 4000);
+  const ground = new THREE.Mesh(groundGeo, new THREE.MeshLambertMaterial({color:0x4a7c4e}));
+  ground.rotation.x = -Math.PI/2;
+  scene.add(ground);
+
+  // ---- Buildings: merged wall geometry, extruded to real height ----
+  function buildBuildingsMesh(buildings){
+    const positions = [];
+    for(const [ring, height] of buildings){
+      const n = ring.length;
+      for(let i=0;i<n;i++){
+        const [x1,y1] = ring[i];
+        const [x2,y2] = ring[(i+1)%n];
+        const ax=x1, az=-y1, bx=x2, bz=-y2;
+        positions.push(ax,0,az,  bx,0,bz,  bx,height,bz);
+        positions.push(ax,0,az,  bx,height,bz,  ax,height,az);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions,3));
+    geo.computeVertexNormals();
+    return geo;
+  }
+  const buildingsMesh = new THREE.Mesh(
+    buildBuildingsMesh(data.buildings),
+    new THREE.MeshPhongMaterial({color:0xc9beab, flatShading:true, side:THREE.DoubleSide})
+  );
+  scene.add(buildingsMesh);
+
+  // ---- Roads: merged flat ribbon quads, width per road ----
+  function buildRoadsMesh(roads){
+    const positions = [];
+    const y = 0.06;
+    for(const [pts, width] of roads){
+      for(let i=0;i<pts.length-1;i++){
+        const [x1,y1] = pts[i], [x2,y2] = pts[i+1];
+        const ax=x1, az=-y1, bx=x2, bz=-y2;
+        let dx=bx-ax, dz=bz-az;
+        const len = Math.hypot(dx,dz) || 1;
+        dx/=len; dz/=len;
+        const nx=-dz, nz=dx;
+        const hw = width/2;
+        const p1x=ax+nx*hw, p1z=az+nz*hw;
+        const p2x=ax-nx*hw, p2z=az-nz*hw;
+        const p3x=bx-nx*hw, p3z=bz-nz*hw;
+        const p4x=bx+nx*hw, p4z=bz+nz*hw;
+        positions.push(p1x,y,p1z, p2x,y,p2z, p3x,y,p3z);
+        positions.push(p1x,y,p1z, p3x,y,p3z, p4x,y,p4z);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions,3));
+    geo.computeVertexNormals();
+    return geo;
+  }
+  const roadsMesh = new THREE.Mesh(
+    buildRoadsMesh(data.roads),
+    new THREE.MeshLambertMaterial({color:0x3a3a3a})
+  );
+  scene.add(roadsMesh);
+
+  // ---- Car ----
+  function buildCarMesh(){
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(4.4,1.0,2.2), new THREE.MeshPhongMaterial({color:0xff5b4a}));
+    body.position.y = 0.9; g.add(body);
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.2,0.9,1.8), new THREE.MeshPhongMaterial({color:0x222222}));
+    cabin.position.set(0,1.8,-0.2); g.add(cabin);
+    const wheelGeo = new THREE.CylinderGeometry(0.64,0.64,0.6,10);
+    const wheelMat = new THREE.MeshPhongMaterial({color:0x1a1a1a});
+    [[1.5,1.1],[1.5,-1.1],[-1.5,1.1],[-1.5,-1.1]].forEach(([wx,wz])=>{
+      const w = new THREE.Mesh(wheelGeo, wheelMat);
+      w.rotation.x = Math.PI/2; w.position.set(wx,0.64,wz); g.add(w);
+    });
+    return g;
+  }
+  const carGroup = buildCarMesh();
+  scene.add(carGroup);
+
+  // ---- Car state, in local meters (X=east, Z=south) ----
+  const car = { x:0, z:0, bearingDeg:0, speed:0, boost:0, boosting:0 };
 
   const keys = { left:false, right:false, gas:false, boost:false };
   function bindBtn(id,key){
@@ -113,7 +196,7 @@ window.addEventListener('load', function(){
 
   function updateCar(dt){
     const turning = keys.left || keys.right;
-    const turnRate = 75; // degrees/sec at speed
+    const turnRate = 75;
     const turnFactor = Math.min(1, Math.abs(car.speed)/4 + 0.3);
     if(keys.left) car.bearingDeg -= turnRate*dt*turnFactor;
     if(keys.right) car.bearingDeg += turnRate*dt*turnFactor;
@@ -128,147 +211,47 @@ window.addEventListener('load', function(){
     car.speed = Math.max(0, Math.min(car.boosting>0?30:18, car.speed));
 
     const bearingRad = car.bearingDeg * Math.PI/180;
-    const dEast = Math.sin(bearingRad) * car.speed * dt;
-    const dNorth = Math.cos(bearingRad) * car.speed * dt;
-    car.lng += dEast / metersPerDegLng;
-    car.lat += dNorth / metersPerDegLat;
+    // Forward vector consistent with the mesh's rotation below: at
+    // bearing 0 the car drives toward -Z (north).
+    const fwdX = Math.sin(bearingRad);
+    const fwdZ = -Math.cos(bearingRad);
+    car.x += fwdX * car.speed * dt;
+    car.z += fwdZ * car.speed * dt;
+
+    carGroup.position.set(car.x, 0, car.z);
+    carGroup.rotation.y = -bearingRad;
   }
 
-  // ---- Custom Three.js layer rendered inside the Mapbox GL context ----
-  // Follows the official Mapbox "Add a 3D model with three.js" pattern,
-  // but the model is redrawn at the car's current lng/lat every frame
-  // instead of staying fixed. This is what keeps the car's motion smooth
-  // at full framerate EVEN THOUGH the map camera itself is now throttled
-  // (see CAM_UPDATE_MS below) — the two are fully decoupled.
-  function buildCarMesh(){
-    const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.BoxGeometry(2.2,0.5,1.1), new THREE.MeshPhongMaterial({color:0xff5b4a}));
-    body.position.y = 0.45; g.add(body);
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.1,0.45,0.9), new THREE.MeshPhongMaterial({color:0x222222}));
-    cabin.position.set(-0.1,0.9,0); g.add(cabin);
-    const wheelGeo = new THREE.CylinderGeometry(0.32,0.32,0.3,10);
-    const wheelMat = new THREE.MeshPhongMaterial({color:0x1a1a1a});
-    [[0.75,0.55],[0.75,-0.55],[-0.75,0.55],[-0.75,-0.55]].forEach(([wx,wz])=>{
-      const w = new THREE.Mesh(wheelGeo, wheelMat);
-      w.rotation.z = Math.PI/2; w.position.set(wx,0.32,wz); g.add(w);
-    });
-    return g;
+  // ---- Local chase camera, updated every frame directly from car state —
+  // no network calls involved at all, so nothing here can rate-limit or
+  // stutter the way the old Mapbox camera did. ----
+  const CAM_DIST = 9, CAM_HEIGHT = 4.5, LOOK_AHEAD = 6, LOOK_LIFT = 1.2;
+  function updateCamera(){
+    const bearingRad = car.bearingDeg * Math.PI/180;
+    const fwdX = Math.sin(bearingRad), fwdZ = -Math.cos(bearingRad);
+    camera.position.set(
+      car.x - fwdX*CAM_DIST,
+      CAM_HEIGHT,
+      car.z - fwdZ*CAM_DIST
+    );
+    camera.lookAt(car.x + fwdX*LOOK_AHEAD, LOOK_LIFT, car.z + fwdZ*LOOK_AHEAD);
   }
 
-  const customLayer = {
-    id: 'car-3d-layer',
-    type: 'custom',
-    renderingMode: '3d',
-    onAdd: function(map, gl){
-      this.camera = new THREE.Camera();
-      this.scene = new THREE.Scene();
-      this.scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-      const sun = new THREE.DirectionalLight(0xffffff, 0.9);
-      sun.position.set(0,-70,100).normalize();
-      this.scene.add(sun);
-      this.carMesh = buildCarMesh();
-      this.scene.add(this.carMesh);
+  loadingEl.style.display = 'none';
 
-      this.renderer = new THREE.WebGLRenderer({
-        canvas: map.getCanvas(), context: gl, antialias: true
-      });
-      this.renderer.autoClear = false;
-    },
-    render: function(gl, matrix){
-      // Convert the car's real lng/lat into Mapbox's Mercator coordinate
-      // space, then combine with the map's own projection matrix — this is
-      // the standard way to place a moving three.js object at real-world
-      // GPS coordinates on a Mapbox GL custom layer.
-      const mc = mapboxgl.MercatorCoordinate.fromLngLat([car.lng, car.lat], 0.6);
-      const scale = mc.meterInMercatorCoordinateUnits() * CAR_VISUAL_SCALE;
-
-      const m = new THREE.Matrix4().fromArray(matrix);
-      const l = new THREE.Matrix4()
-        .makeTranslation(mc.x, mc.y, mc.z)
-        .scale(new THREE.Vector3(scale, -scale, scale))
-        .multiply(new THREE.Matrix4().makeRotationZ(-car.bearingDeg*Math.PI/180 + Math.PI/2))
-        .multiply(new THREE.Matrix4().makeRotationX(Math.PI/2));
-
-      this.camera.projectionMatrix = m.multiply(l);
-      this.renderer.resetState();
-      this.renderer.render(this.scene, this.camera);
-      map.triggerRepaint();
-    }
-  };
-
-  map.on('load', ()=>{
-    // Real 3D buildings, extruded to their real height — data from OpenStreetMap,
-    // bundled in Mapbox's own vector tiles. No manual OSM export needed.
-    const layers = map.getStyle().layers;
-    let labelLayerId;
-    for(const layer of layers){
-      if(layer.type === 'symbol' && layer.layout && layer.layout['text-field']){ labelLayerId = layer.id; break; }
-    }
-    try {
-      map.addLayer({
-        id: 'add-3d-buildings',
-        source: 'composite',
-        'source-layer': 'building',
-        filter: ['==', 'extrude', 'true'],
-        type: 'fill-extrusion',
-        minzoom: 14,
-        paint: {
-          'fill-extrusion-color': '#c9beab',
-          'fill-extrusion-height': ['interpolate',['linear'],['zoom'],14,0,14.05,['get','height']],
-          'fill-extrusion-base': ['interpolate',['linear'],['zoom'],14,0,14.05,['get','min_height']],
-          'fill-extrusion-opacity': 0.9
-        }
-      }, labelLayerId);
-    } catch(e){ /* satellite-streets style may already include buildings; ignore if layer exists */ }
-
-    map.addLayer(customLayer);
-    mapLoaded = true;
-    loadingEl.style.display = 'none';
-
-    let last = performance.now();
-    let lastCamUpdate = 0;
-    // DevTools network tab showed every satellite tile request coming back
-    // 429 "Too Many Requests" — Mapbox was rate-limiting us because moving
-    // the camera every single animation frame (60/sec) re-requests nearby
-    // tiles constantly. That's why satellite imagery and road lines NEVER
-    // rendered, from the very first version: it's not a loading-speed
-    // problem, it's a hard rate limit. Throttling to a few camera updates
-    // per second fixes it. The car itself keeps animating at full
-    // framerate regardless (via the custom layer's own render() above),
-    // so this doesn't reintroduce visible motion stutter.
-    const CAM_UPDATE_MS = 400;
-    function frame(now){
-      const dt = Math.min(0.033, (now-last)/1000); last = now;
-      updateCar(dt);
-      if(now - lastCamUpdate > CAM_UPDATE_MS){
-        lastCamUpdate = now;
-        map.easeTo({
-          center:[car.lng, car.lat], bearing: car.bearingDeg, pitch: MAP_PITCH, zoom: MAP_ZOOM,
-          duration: CAM_UPDATE_MS, easing: t => t
-        });
-      }
-      document.getElementById('boostfill').style.width = car.boost + '%';
-      document.getElementById('boost').classList.toggle('ready', car.boost > 20);
-      requestAnimationFrame(frame);
-    }
+  let last = performance.now();
+  function frame(now){
+    const dt = Math.min(0.033, (now-last)/1000); last = now;
+    updateCar(dt);
+    updateCamera();
+    renderer.render(scene, camera);
+    document.getElementById('boostfill').style.width = car.boost + '%';
+    document.getElementById('boost').classList.toggle('ready', car.boost > 20);
     requestAnimationFrame(frame);
-  });
+  }
+  requestAnimationFrame(frame);
 
-  let mapLoaded = false;
-  map.on('error', (e)=>{
-    console.error('Mapbox error:', e);
-    // Mapbox fires 'error' for plenty of non-fatal things too (a single
-    // missing tile, a sprite glyph, etc.) — only treat it as fatal (and cover
-    // the screen) if the map never finished its initial load.
-    if(mapLoaded) return;
-    loadingEl.style.display = 'flex';
-    let msg = 'neznáma chyba (pozri konzolu prehliadača — F12)';
-    try {
-      if(e && e.error){ msg = e.error.message || e.error.toString(); }
-      else if(e && e.type){ msg = 'event: ' + e.type; }
-    } catch(inner){ /* keep fallback */ }
-    loadingEl.innerText = 'Mapbox chyba: ' + msg;
-  });
+  } // initGame
 
   } catch(err){
     loadingEl.innerText = 'JS chyba: ' + err.message;
