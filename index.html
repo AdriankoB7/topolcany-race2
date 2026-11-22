@@ -211,6 +211,7 @@ window.addEventListener('load', function(){
     } catch(e){ /* satellite-streets style may already include buildings; ignore if layer exists */ }
 
     map.addLayer(customLayer);
+    mapLoaded = true;
     loadingEl.style.display = 'none';
 
     let last = performance.now();
@@ -225,10 +226,20 @@ window.addEventListener('load', function(){
     requestAnimationFrame(frame);
   });
 
+  let mapLoaded = false;
   map.on('error', (e)=>{
     console.error('Mapbox error:', e);
+    // Mapbox fires 'error' for plenty of non-fatal things too (a single
+    // missing tile, a sprite glyph, etc.) — only treat it as fatal (and cover
+    // the screen) if the map never finished its initial load.
+    if(mapLoaded) return;
     loadingEl.style.display = 'flex';
-    loadingEl.innerText = 'Mapbox chyba: ' + (e && e.error && e.error.message ? e.error.message : JSON.stringify(e).slice(0,200));
+    let msg = 'neznáma chyba (pozri konzolu prehliadača — F12)';
+    try {
+      if(e && e.error){ msg = e.error.message || e.error.toString(); }
+      else if(e && e.type){ msg = 'event: ' + e.type; }
+    } catch(inner){ /* keep fallback */ }
+    loadingEl.innerText = 'Mapbox chyba: ' + msg;
   });
 
   } catch(err){
