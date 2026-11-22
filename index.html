@@ -74,11 +74,11 @@ window.addEventListener('load', function(){
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(SKY_COLOR);
-  scene.fog = new THREE.Fog(SKY_COLOR, 90, 420);
+  scene.fog = new THREE.Fog(SKY_COLOR, 140, 480);
 
-  const camera = new THREE.PerspectiveCamera(62, window.innerWidth/window.innerHeight, 0.1, 2000);
+  const camera = new THREE.PerspectiveCamera(68, window.innerWidth/window.innerHeight, 0.1, 2000);
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.8));
   const sun = new THREE.DirectionalLight(0xffffff, 0.85);
   sun.position.set(120, 220, 80);
   scene.add(sun);
@@ -89,11 +89,17 @@ window.addEventListener('load', function(){
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // ---- Ground plane ----
+  // ---- Ground plane + a light grid so there's a sense of scale/orientation
+  // even in areas the dataset doesn't cover (outside the ~400x400m box). ----
   const groundGeo = new THREE.PlaneGeometry(4000, 4000);
   const ground = new THREE.Mesh(groundGeo, new THREE.MeshLambertMaterial({color:0x4a7c4e}));
   ground.rotation.x = -Math.PI/2;
   scene.add(ground);
+  const grid = new THREE.GridHelper(1000, 100, 0x2f5c33, 0x2f5c33);
+  grid.position.y = 0.03;
+  grid.material.transparent = true;
+  grid.material.opacity = 0.35;
+  scene.add(grid);
 
   // ---- Buildings: merged wall geometry, extruded to real height ----
   function buildBuildingsMesh(buildings){
@@ -147,8 +153,9 @@ window.addEventListener('load', function(){
   }
   const roadsMesh = new THREE.Mesh(
     buildRoadsMesh(data.roads),
-    new THREE.MeshLambertMaterial({color:0x3a3a3a})
+    new THREE.MeshLambertMaterial({color:0x474747})
   );
+  roadsMesh.renderOrder = 1;
   scene.add(roadsMesh);
 
   // ---- Car ----
@@ -169,8 +176,11 @@ window.addEventListener('load', function(){
   const carGroup = buildCarMesh();
   scene.add(carGroup);
 
-  // ---- Car state, in local meters (X=east, Z=south) ----
-  const car = { x:0, z:0, bearingDeg:0, speed:0, boost:0, boosting:0 };
+  // ---- Car state, in local meters (X=east, Z=south). Spawn a little south
+  // of the dataset's centre point and facing north, so the opening view
+  // looks across open ground toward the square instead of starting wedged
+  // directly against a building wall. ----
+  const car = { x:0, z:40, bearingDeg:0, speed:0, boost:0, boosting:0 };
 
   const keys = { left:false, right:false, gas:false, boost:false };
   function bindBtn(id,key){
@@ -224,8 +234,10 @@ window.addEventListener('load', function(){
 
   // ---- Local chase camera, updated every frame directly from car state —
   // no network calls involved at all, so nothing here can rate-limit or
-  // stutter the way the old Mapbox camera did. ----
-  const CAM_DIST = 9, CAM_HEIGHT = 4.5, LOOK_AHEAD = 6, LOOK_LIFT = 1.2;
+  // stutter the way the old Mapbox camera did. Pulled back further and
+  // higher than a strict "real" chase cam so the player can actually see
+  // the street layout around them, not just the nearest wall. ----
+  const CAM_DIST = 15, CAM_HEIGHT = 8.5, LOOK_AHEAD = 10, LOOK_LIFT = 1.5;
   function updateCamera(){
     const bearingRad = car.bearingDeg * Math.PI/180;
     const fwdX = Math.sin(bearingRad), fwdZ = -Math.cos(bearingRad);
