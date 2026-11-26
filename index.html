@@ -1,10 +1,10 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-<title>Topoľčany Race Demo – vlastný dataset (OSM)</title>
-<style>
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+&lt;meta charset="utf-8"&gt;
+&lt;meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no"&gt;
+&lt;title&gt;Topoľčany Race Demo – vlastný dataset (OSM)&lt;/title&gt;
+&lt;style&gt;
   html,body{margin:0;padding:0;overflow:hidden;background:#111;touch-action:none;}
   #canvas3d{position:fixed;inset:0;display:block;}
   #ui{position:fixed;bottom:0;left:0;width:100%;height:170px;z-index:10;}
@@ -23,26 +23,26 @@
   #attrib{position:fixed;right:6px;bottom:176px;z-index:10;color:rgba(255,255,255,0.65);font-family:sans-serif;font-size:10px;background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;}
   #loading{position:fixed;inset:0;background:#111;color:#fff;font-family:sans-serif;display:flex;
     align-items:center;justify-content:center;z-index:20;font-size:15px;text-align:center;padding:20px;box-sizing:border-box;}
-</style>
-</head>
-<body>
-<div id="loading">Načítavam vlastný dataset mapy (data.json)...</div>
-<canvas id="canvas3d"></canvas>
-<div id="hud">
-  Topoľčany – vlastný dataset (OpenStreetMap + satelit, stiahnuté raz, bez živého API)<br>
-  Ak sa niečo pokazí, napíš presne čo vidíš<br>
-  <div id="boostbar"><div id="boostfill"></div></div>
-</div>
-<div id="attrib">© OpenStreetMap contributors, © Mapbox</div>
-<div id="ui">
-  <div class="btn" id="left">&#8630;</div>
-  <div class="btn" id="right">&#8631;</div>
-  <div class="btn" id="gas">GAS</div>
-  <div class="btn" id="boost">BOOST</div>
-</div>
+&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;div id="loading"&gt;Načítavam vlastný dataset mapy (data.json)...&lt;/div&gt;
+&lt;canvas id="canvas3d"&gt;&lt;/canvas&gt;
+&lt;div id="hud"&gt;
+  Topoľčany – vlastný dataset (OpenStreetMap, stiahnuté raz, bez živého API)&lt;br&gt;
+  Ak sa niečo pokazí, napíš presne čo vidíš&lt;br&gt;
+  &lt;div id="boostbar"&gt;&lt;div id="boostfill"&gt;&lt;/div&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;div id="attrib"&gt;© OpenStreetMap contributors&lt;/div&gt;
+&lt;div id="ui"&gt;
+  &lt;div class="btn" id="left"&gt;&amp;#8630;&lt;/div&gt;
+  &lt;div class="btn" id="right"&gt;&amp;#8631;&lt;/div&gt;
+  &lt;div class="btn" id="gas"&gt;GAS&lt;/div&gt;
+  &lt;div class="btn" id="boost"&gt;BOOST&lt;/div&gt;
+&lt;/div&gt;
 
-<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
-<script>
+&lt;script src="https://unpkg.com/three@0.160.0/build/three.min.js"&gt;&lt;/script&gt;
+&lt;script&gt;
 window.addEventListener('load', function(){
   const loadingEl = document.getElementById('loading');
   try {
@@ -55,10 +55,10 @@ window.addEventListener('load', function(){
   // live tile API, no rate limits — this fetch is same-origin and happens
   // exactly once at load. World convention: X = east, Z = south
   // (so Z = -north), Y = up.
-  fetch('./data.json').then(r=>{
+  fetch('./data.json').then(r=&gt;{
     if(!r.ok) throw new Error('data.json HTTP ' + r.status);
     return r.json();
-  }).then(initGame).catch(err=>{
+  }).then(initGame).catch(err=&gt;{
     loadingEl.innerText = 'Nepodarilo sa načítať data.json: ' + err.message;
     console.error(err);
   });
@@ -83,7 +83,7 @@ window.addEventListener('load', function(){
   sun.position.set(120, 220, 80);
   scene.add(sun);
 
-  window.addEventListener('resize', ()=>{
+  window.addEventListener('resize', ()=&gt;{
     camera.aspect = window.innerWidth/window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -101,45 +101,25 @@ window.addEventListener('load', function(){
   grid.material.opacity = 0.35;
   scene.add(grid);
 
-  // ---- Real satellite/street-map texture, downloaded ONCE (not a live
-  // tile stream) for the exact same bounding box as data.json, stored as
-  // our own base64-text asset (map_texture.b64) and decoded client-side
-  // with atob() — no image hosting dependency at runtime either. Sits on
-  // a 400x400m plane centred on the local origin, matching the dataset's
-  // real-world extent exactly. Default PlaneGeometry UVs already line up
-  // with our X=east/Z=south convention (top of the photo = north = -Z). ----
+  // ---- Ground plane for the dataset's own 400x400m area. Satellite
+  // imagery was dropped entirely (Mapbox's terms forbid storing or
+  // deriving from their map/satellite content — see project notes).
+  // Textures below are swapped in from our own CC0 (public-domain) asset
+  // set once downloaded; this plain color is just the placeholder until
+  // that lands. ----
   const mapGroundGeo = new THREE.PlaneGeometry(400, 400);
-  const mapGroundMat = new THREE.MeshBasicMaterial({color:0x3f6b43});
+  const mapGroundMat = new THREE.MeshLambertMaterial({color:0x3f6b43});
   const mapGround = new THREE.Mesh(mapGroundGeo, mapGroundMat);
   mapGround.rotation.x = -Math.PI/2;
   mapGround.position.y = 0.02;
   scene.add(mapGround);
-
-  fetch('./map_texture.b64').then(r=>{
-    if(!r.ok) throw new Error('map_texture.b64 HTTP ' + r.status);
-    return r.text();
-  }).then(b64=>{
-    const binary = atob(b64.trim());
-    const bytes = new Uint8Array(binary.length);
-    for(let i=0;i<binary.length;i++) bytes[i] = binary.charCodeAt(i);
-    const blob = new Blob([bytes], {type:'image/jpeg'});
-    const url = URL.createObjectURL(blob);
-    new THREE.TextureLoader().load(url, (tex)=>{
-      if('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
-      mapGroundMat.map = tex;
-      mapGroundMat.needsUpdate = true;
-      URL.revokeObjectURL(url);
-    });
-  }).catch(err=>{
-    console.error('Textúra mapy sa nenačítala:', err);
-  });
 
   // ---- Buildings: merged wall geometry, extruded to real height ----
   function buildBuildingsMesh(buildings){
     const positions = [];
     for(const [ring, height] of buildings){
       const n = ring.length;
-      for(let i=0;i<n;i++){
+      for(let i=0;i&lt;n;i++){
         const [x1,y1] = ring[i];
         const [x2,y2] = ring[(i+1)%n];
         const ax=x1, az=-y1, bx=x2, bz=-y2;
@@ -163,7 +143,7 @@ window.addEventListener('load', function(){
     const positions = [];
     const y = 0.06;
     for(const [pts, width] of roads){
-      for(let i=0;i<pts.length-1;i++){
+      for(let i=0;i&lt;pts.length-1;i++){
         const [x1,y1] = pts[i], [x2,y2] = pts[i+1];
         const ax=x1, az=-y1, bx=x2, bz=-y2;
         let dx=bx-ax, dz=bz-az;
@@ -222,10 +202,10 @@ window.addEventListener('load', function(){
     for(const [pts, width, name] of data.roads){
       if(!name) continue;
       let length = 0;
-      for(let i=0;i<pts.length-1;i++){
+      for(let i=0;i&lt;pts.length-1;i++){
         length += Math.hypot(pts[i+1][0]-pts[i][0], pts[i+1][1]-pts[i][1]);
       }
-      if(!byName[name] || length > byName[name].length){
+      if(!byName[name] || length &gt; byName[name].length){
         const mid = pts[Math.floor(pts.length/2)];
         byName[name] = {length, mid};
       }
@@ -247,7 +227,7 @@ window.addEventListener('load', function(){
     cabin.position.set(0,1.8,-0.2); g.add(cabin);
     const wheelGeo = new THREE.CylinderGeometry(0.64,0.64,0.6,10);
     const wheelMat = new THREE.MeshPhongMaterial({color:0x1a1a1a});
-    [[1.5,1.1],[1.5,-1.1],[-1.5,1.1],[-1.5,-1.1]].forEach(([wx,wz])=>{
+    [[1.5,1.1],[1.5,-1.1],[-1.5,1.1],[-1.5,-1.1]].forEach(([wx,wz])=&gt;{
       const w = new THREE.Mesh(wheelGeo, wheelMat);
       w.rotation.x = Math.PI/2; w.position.set(wx,0.64,wz); g.add(w);
     });
@@ -265,19 +245,19 @@ window.addEventListener('load', function(){
   const keys = { left:false, right:false, gas:false, boost:false };
   function bindBtn(id,key){
     const el = document.getElementById(id);
-    const on = e=>{keys[key]=true; e.preventDefault();};
-    const off = e=>{keys[key]=false; e.preventDefault();};
+    const on = e=&gt;{keys[key]=true; e.preventDefault();};
+    const off = e=&gt;{keys[key]=false; e.preventDefault();};
     el.addEventListener('touchstart',on); el.addEventListener('touchend',off); el.addEventListener('touchcancel',off);
     el.addEventListener('mousedown',on); el.addEventListener('mouseup',off); el.addEventListener('mouseleave',off);
   }
   bindBtn('left','left'); bindBtn('right','right'); bindBtn('gas','gas'); bindBtn('boost','boost');
-  window.addEventListener('keydown', e=>{
+  window.addEventListener('keydown', e=&gt;{
     if(e.key==='ArrowLeft') keys.left=true;
     if(e.key==='ArrowRight') keys.right=true;
     if(e.key==='ArrowUp') keys.gas=true;
     if(e.key===' ') keys.boost=true;
   });
-  window.addEventListener('keyup', e=>{
+  window.addEventListener('keyup', e=&gt;{
     if(e.key==='ArrowLeft') keys.left=false;
     if(e.key==='ArrowRight') keys.right=false;
     if(e.key==='ArrowUp') keys.gas=false;
@@ -291,14 +271,14 @@ window.addEventListener('load', function(){
     if(keys.left) car.bearingDeg -= turnRate*dt*turnFactor;
     if(keys.right) car.bearingDeg += turnRate*dt*turnFactor;
 
-    if(keys.boost && car.boost>5 && car.boosting<=0) car.boosting = 1.1;
-    if(car.boosting>0){ car.boosting -= dt; car.boost = Math.max(0, car.boost-55*dt); }
-    if(turning && car.speed > 6){ car.boost = Math.min(100, car.boost + 38*dt); }
+    if(keys.boost && car.boost&gt;5 && car.boosting&lt;=0) car.boosting = 1.1;
+    if(car.boosting&gt;0){ car.boosting -= dt; car.boost = Math.max(0, car.boost-55*dt); }
+    if(turning && car.speed &gt; 6){ car.boost = Math.min(100, car.boost + 38*dt); }
 
     if(keys.gas) car.speed += 13*dt; else car.speed -= 6.5*dt;
-    if(car.boosting>0) car.speed += 18*dt;
+    if(car.boosting&gt;0) car.speed += 18*dt;
     car.speed *= 0.995;
-    car.speed = Math.max(0, Math.min(car.boosting>0?30:18, car.speed));
+    car.speed = Math.max(0, Math.min(car.boosting&gt;0?30:18, car.speed));
 
     const bearingRad = car.bearingDeg * Math.PI/180;
     // Forward vector consistent with the mesh's rotation below: at
@@ -338,7 +318,7 @@ window.addEventListener('load', function(){
     updateCamera();
     renderer.render(scene, camera);
     document.getElementById('boostfill').style.width = car.boost + '%';
-    document.getElementById('boost').classList.toggle('ready', car.boost > 20);
+    document.getElementById('boost').classList.toggle('ready', car.boost &gt; 20);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
@@ -350,6 +330,6 @@ window.addEventListener('load', function(){
     console.error(err);
   }
 });
-</script>
-</body>
-</html>
+&lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;
